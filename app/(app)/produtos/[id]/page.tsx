@@ -100,6 +100,8 @@ export default function ProductDetailPage() {
   const filteredVideos = videos.filter((v) => v.type === activeTab && !isMediaVideoRecord(v))
   const filteredManuals = manuals.filter((m) => m.type === activeTab)
   const filteredMedia = videos.filter((v) => v.type === activeTab && isMediaVideoRecord(v))
+  const mediaCount = videos.filter((v) => isMediaVideoRecord(v)).length
+  const videoCount = videos.length - mediaCount
 
   async function deleteProduct() {
     setDeleting(true)
@@ -252,10 +254,13 @@ export default function ProductDetailPage() {
                 )}
                 <div className="flex items-center gap-3 mt-4">
                   <span className="text-xs text-text-muted bg-canvas border border-border px-2.5 py-1 rounded-full">
-                    {videos.length} vídeo{videos.length !== 1 ? 's' : ''}
+                    {videoCount} {videoCount === 1 ? 'vídeo' : 'vídeos'}
                   </span>
                   <span className="text-xs text-text-muted bg-canvas border border-border px-2.5 py-1 rounded-full">
-                    {manuals.length} manual{manuals.length !== 1 ? 'is' : ''}
+                    {mediaCount} {mediaCount === 1 ? 'mídia' : 'mídias'}
+                  </span>
+                  <span className="text-xs text-text-muted bg-canvas border border-border px-2.5 py-1 rounded-full">
+                    {manuals.length} {manuals.length === 1 ? 'manual' : 'manuais'}
                   </span>
                 </div>
               </div>
