@@ -3,8 +3,9 @@
 import { useState, useRef, useEffect } from 'react'
 import { useRouter, useParams } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
-import { ArrowLeft, ImagePlus, Loader2, Package, CheckCircle, AlertCircle, X, Plus, Video, FileText, Link2, Upload, Trash2 } from 'lucide-react'
+import { ArrowLeft, ImagePlus, Loader2, Package, CheckCircle, AlertCircle, X, Plus, Video, FileText, Image, Link2, Upload, Trash2 } from 'lucide-react'
 import Link from 'next/link'
+import { MAX_MEDIA_PER_PRODUCT, isMediaVideoRecord, isMediaFile } from '@/lib/products/media'
 
 export default function EditarProdutoPage() {
     const router = useRouter()
@@ -29,7 +30,7 @@ export default function EditarProdutoPage() {
     // Pending Contents
     type PendingContent = {
         id: string
-        uploadType: 'video' | 'manual'
+        uploadType: 'video' | 'manual' | 'media'
         category: 'sales' | 'assembly' | 'technical'
         videoSource?: 'file' | 'url'
         title: string
@@ -41,7 +42,7 @@ export default function EditarProdutoPage() {
 
     // State for the inline content form
     const [showContentForm, setShowContentForm] = useState(false)
-    const [uploadType, setUploadType] = useState<'video' | 'manual'>('video')
+    const [uploadType, setUploadType] = useState<'video' | 'manual' | 'media'>('video')
     const [category, setCategory] = useState<'sales' | 'assembly' | 'technical'>('sales')
     const [videoSource, setVideoSource] = useState<'file' | 'url'>('file')
     const [videoUrl, setVideoUrl] = useState('')
@@ -110,8 +111,23 @@ export default function EditarProdutoPage() {
 
     function handleAddContent() {
         const isUrlVideo = uploadType === 'video' && videoSource === 'url'
-        if (!isUrlVideo && (!uploadFile || !uploadTitle)) return
-        if (isUrlVideo && (!videoUrl.trim() || !uploadTitle)) return
+        const isMedia = uploadType === 'media'
+        if (!uploadTitle.trim()) return
+        if (!isUrlVideo && !uploadFile) return
+        if (isUrlVideo && !videoUrl.trim()) return
+
+        if (isMedia) {
+            const existingMediaCount = existingVideos.filter((v) => !deletedVideoIds.includes(v.id) && isMediaVideoRecord(v)).length
+            const pendingMediaCount = contents.filter((c) => c.uploadType === 'media').length
+            if (existingMediaCount + pendingMediaCount >= MAX_MEDIA_PER_PRODUCT) {
+                setError('Limite de ' + MAX_MEDIA_PER_PRODUCT + ' midias por produto.')
+                return
+            }
+            if (!isMediaFile(uploadFile)) {
+                setError('Para midia, envie apenas arquivos de imagem.')
+                return
+            }
+        }
 
         const newContent: PendingContent = {
             id: Math.random().toString(36).slice(2),
@@ -124,6 +140,7 @@ export default function EditarProdutoPage() {
             url: isUrlVideo ? videoUrl.trim() : undefined,
         }
 
+        setError(null)
         setContents([...contents, newContent])
 
         // Reset form
@@ -219,9 +236,9 @@ export default function EditarProdutoPage() {
                 return
             }
 
-            const bucket = content.uploadType === 'video' ? 'videos' : 'manuals'
+            const bucket = content.uploadType === 'video' ? 'videos' : content.uploadType === 'media' ? 'product-images' : 'manuals'
             const ext = content.file.name.split('.').pop()
-            const path = `${id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+            const path = content.uploadType === 'media' ? `media/${id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}` : `${id}/${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
 
             const { error: storageError } = await supabase.storage.from(bucket).upload(path, content.file)
             if (storageError) {
@@ -232,7 +249,7 @@ export default function EditarProdutoPage() {
 
             const { data: publicUrl } = supabase.storage.from(bucket).getPublicUrl(path)
 
-            if (content.uploadType === 'video') {
+            if (content.uploadType === 'video' || content.uploadType === 'media') {
                 const { error: insertVideoError } = await supabase.from('videos').insert({
                     product_id: id,
                     title: content.title,
@@ -242,7 +259,7 @@ export default function EditarProdutoPage() {
                     storage_path: path,
                 })
                 if (insertVideoError) {
-                    setError(`Erro ao registrar video: ${content.title}`)
+                    setError(`Erro ao registrar ${content.uploadType === 'media' ? 'midia' : 'video'}: ${content.title}`)
                     setLoading(false)
                     return
                 }
@@ -415,12 +432,12 @@ export default function EditarProdutoPage() {
                             <div key={v.id} className="flex items-center justify-between p-3 bg-canvas border border-border rounded-lg">
                                 <div className="flex items-center gap-3">
                                     <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center flex-shrink-0">
-                                        <Video className="w-4 h-4 text-accent" />
+                                        {isMediaVideoRecord(v) ? <Image className="w-4 h-4 text-accent" /> : <Video className="w-4 h-4 text-accent" />}
                                     </div>
                                     <div>
                                         <p className="text-sm font-semibold text-text-primary line-clamp-1">{v.title}</p>
                                         <p className="text-xs text-text-muted">
-                                            Vídeo ({
+                                            {isMediaVideoRecord(v) ? 'Mídia' : 'Vídeo'} ({
                                                 v.type === 'sales' ? '🎯 Como vender' :
                                                     v.type === 'assembly' ? '🔧 Como montar' : '📋 Ficha técnica'
                                             })
@@ -469,13 +486,13 @@ export default function EditarProdutoPage() {
                             <div key={c.id} className="flex items-center justify-between p-3 bg-accent/5 border border-accent/20 rounded-lg">
                                 <div className="flex items-center gap-3">
                                     <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center flex-shrink-0">
-                                        {c.uploadType === 'video' ? <Video className="w-4 h-4 text-accent" /> : <FileText className="w-4 h-4 text-accent" />}
+                                        {c.uploadType === 'video' ? <Video className="w-4 h-4 text-accent" /> : c.uploadType === 'media' ? <Image className="w-4 h-4 text-accent" /> : <FileText className="w-4 h-4 text-accent" />}
                                     </div>
                                     <div>
                                         <p className="text-sm font-semibold text-text-primary line-clamp-1">{c.title}</p>
                                         <p className="text-xs text-text-muted">
                                             <span className="text-accent font-medium mr-1">Novo</span>
-                                            {c.uploadType === 'video' ? 'Vídeo' : 'Arquivo'} ({
+                                            {c.uploadType === 'video' ? 'Vídeo' : c.uploadType === 'media' ? 'Mídia' : 'Arquivo'} ({
                                                 c.category === 'sales' ? '🎯 Como vender' :
                                                     c.category === 'assembly' ? '🔧 Como montar' : '📋 Ficha técnica'
                                             })
@@ -513,10 +530,10 @@ export default function EditarProdutoPage() {
                             </div>
 
                             {/* Tipo de upload */}
-                            <div className="grid grid-cols-2 gap-2">
+                            <div className="grid grid-cols-3 gap-2">
                                 <button
                                     type="button"
-                                    onClick={() => { setUploadType('video'); setUploadFile(null) }}
+                                    onClick={() => { setUploadType('video'); setUploadFile(null); setVideoSource('file'); setVideoUrl('') }}
                                     className={`
                     p-3 rounded-lg border flex items-center gap-2 transition-all text-left
                     ${uploadType === 'video' ? 'border-accent bg-accent-muted' : 'border-border bg-card hover:border-accent/50'}
@@ -529,7 +546,7 @@ export default function EditarProdutoPage() {
                                 </button>
                                 <button
                                     type="button"
-                                    onClick={() => { setUploadType('manual'); setUploadFile(null); setVideoSource('file') }}
+                                    onClick={() => { setUploadType('manual'); setUploadFile(null); setVideoSource('file'); setVideoUrl('') }}
                                     className={`
                     p-3 rounded-lg border flex items-center gap-2 transition-all text-left
                     ${uploadType === 'manual' ? 'border-accent bg-accent-muted' : 'border-border bg-card hover:border-accent/50'}
@@ -540,8 +557,20 @@ export default function EditarProdutoPage() {
                                         <p className={`text-xs font-semibold ${uploadType === 'manual' ? 'text-accent' : 'text-text-primary'}`}>Arquivo</p>
                                     </div>
                                 </button>
+                                <button
+                                    type="button"
+                                    onClick={() => { setUploadType('media'); setUploadFile(null); setVideoSource('file'); setVideoUrl('') }}
+                                    className={`
+                    p-3 rounded-lg border flex items-center gap-2 transition-all text-left
+                    ${uploadType === 'media' ? 'border-accent bg-accent-muted' : 'border-border bg-card hover:border-accent/50'}
+                  `}
+                                >
+                                    <Image className={`w-4 h-4 flex-shrink-0 ${uploadType === 'media' ? 'text-accent' : 'text-text-muted'}`} />
+                                    <div>
+                                        <p className={`text-xs font-semibold ${uploadType === 'media' ? 'text-accent' : 'text-text-primary'}`}>Mídia</p>
+                                    </div>
+                                </button>
                             </div>
-
                             {/* Categoria (agora para ambos) */}
                             <div>
                                 <label className="block text-xs font-medium text-text-muted mb-1.5">Aba do Conteúdo *</label>
@@ -603,7 +632,7 @@ export default function EditarProdutoPage() {
                                     type="text"
                                     value={uploadTitle}
                                     onChange={(e) => setUploadTitle(e.target.value)}
-                                    placeholder={uploadType === 'video' ? 'Título do vídeo *' : 'Título do manual *'}
+                                    placeholder={uploadType === 'video' ? 'Título do vídeo *' : uploadType === 'media' ? 'Título da mídia *' : 'Título do arquivo *'}
                                     className="w-full px-3 py-2 rounded-lg text-sm bg-card border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent transition-colors"
                                 />
                                 <input
@@ -628,12 +657,12 @@ export default function EditarProdutoPage() {
                                 <label className="flex flex-col items-center justify-center w-full py-4 rounded-lg border-2 border-dashed border-border hover:border-accent cursor-pointer transition-colors bg-card">
                                     <Upload className="w-4 h-4 text-text-muted mb-1" />
                                     <span className="text-xs text-text-muted">
-                                        {uploadFile ? uploadFile.name : 'Anexar Arquivo *'}
+                                        {uploadFile ? uploadFile.name : uploadType === 'media' ? 'Anexar Mídia *' : 'Anexar Arquivo *'}
                                     </span>
                                     <input
                                         type="file"
                                         className="hidden"
-                                        accept={uploadType === 'video' ? 'video/*' : '*/*'}
+                                        accept={uploadType === 'video' ? 'video/*' : uploadType === 'media' ? 'image/*' : '*/*'}
                                         onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
                                     />
                                 </label>

@@ -5,8 +5,9 @@ import { useParams, notFound, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { VideoCard } from '@/components/video-card'
 import { VideoModal } from '@/components/video-modal'
-import { Package, FileText, ExternalLink, ArrowLeft, Play, Pencil, Trash2, X, Check, Loader2, Upload, Video, Link2, Plus, ChevronDown } from 'lucide-react'
+import { Package, FileText, ExternalLink, ArrowLeft, Play, Pencil, Trash2, X, Check, Loader2, Upload, Video, Image, Link2, Plus, ChevronDown } from 'lucide-react'
 import Link from 'next/link'
+import { MAX_MEDIA_PER_PRODUCT, isMediaVideoRecord, isMediaFile } from '@/lib/products/media'
 
 type Tab = 'sales' | 'assembly' | 'technical'
 
@@ -35,7 +36,7 @@ export default function ProductDetailPage() {
 
   // Upload states
   const [showUploadForm, setShowUploadForm] = useState(false)
-  const [uploadType, setUploadType] = useState<'video' | 'manual'>('video')
+  const [uploadType, setUploadType] = useState<'video' | 'manual' | 'media'>('video')
   const [category, setCategory] = useState<'sales' | 'assembly' | 'technical'>('sales')
   const [videoSource, setVideoSource] = useState<'file' | 'url'>('file')
   const [videoUrl, setVideoUrl] = useState('')
@@ -96,8 +97,9 @@ export default function ProductDetailPage() {
 
   if (!product) return null
 
-  const filteredVideos = videos.filter((v) => v.type === activeTab)
+  const filteredVideos = videos.filter((v) => v.type === activeTab && !isMediaVideoRecord(v))
   const filteredManuals = manuals.filter((m) => m.type === activeTab)
+  const filteredMedia = videos.filter((v) => v.type === activeTab && isMediaVideoRecord(v))
 
   async function deleteProduct() {
     setDeleting(true)
@@ -117,8 +119,21 @@ export default function ProductDetailPage() {
   async function handleUpload(e: React.FormEvent) {
     e.preventDefault()
     const isUrlVideo = uploadType === 'video' && videoSource === 'url'
+    const isMedia = uploadType === 'media'
     if (!isUrlVideo && (!uploadFile || !uploadTitle)) return
     if (isUrlVideo && (!videoUrl.trim() || !uploadTitle)) return
+
+    if (isMedia) {
+      const currentMediaCount = videos.filter((v) => isMediaVideoRecord(v)).length
+      if (currentMediaCount >= MAX_MEDIA_PER_PRODUCT) {
+        setUploadError('Limite de ' + MAX_MEDIA_PER_PRODUCT + ' midias por produto.')
+        return
+      }
+      if (!isMediaFile(uploadFile)) {
+        setUploadError('Para midia, envie apenas arquivos de imagem.')
+        return
+      }
+    }
 
     setUploading(true)
     setUploadError(null)
@@ -138,9 +153,9 @@ export default function ProductDetailPage() {
         return
       }
     } else {
-      const bucket = uploadType === 'video' ? 'videos' : 'manuals'
+      const bucket = uploadType === 'video' ? 'videos' : uploadType === 'media' ? 'product-images' : 'manuals'
       const ext = uploadFile!.name.split('.').pop()
-      const path = `${id}/${Date.now()}.${ext}`
+      const path = uploadType === 'media' ? `media/${id}/${Date.now()}.${ext}` : `${id}/${Date.now()}.${ext}`
 
       const { error: storageError } = await supabase.storage
         .from(bucket)
@@ -160,7 +175,7 @@ export default function ProductDetailPage() {
 
       const { data: publicUrl } = supabase.storage.from(bucket).getPublicUrl(path)
 
-      if (uploadType === 'video') {
+      if (uploadType === 'video' || uploadType === 'media') {
         const { error: insertError } = await supabase.from('videos').insert({
           product_id: id,
           title: uploadTitle,
@@ -170,7 +185,7 @@ export default function ProductDetailPage() {
           storage_path: path,
         })
         if (insertError) {
-          setUploadError('Erro ao salvar o v\u00eddeo.')
+          setUploadError(uploadType === 'media' ? 'Erro ao salvar a midia.' : 'Erro ao salvar o video.')
           setUploading(false)
           return
         }
@@ -333,10 +348,10 @@ export default function ProductDetailPage() {
         {showUploadForm && (
           <form onSubmit={handleUpload} className="border-t border-border p-5 space-y-4">
             {/* Tipo de upload */}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-3 gap-2">
               <button
                 type="button"
-                onClick={() => { setUploadType('video'); setUploadFile(null) }}
+                onClick={() => { setUploadType('video'); setUploadFile(null); setVideoSource('file'); setVideoUrl('') }}
                 className={`
                   p-3 rounded-lg border-2 flex items-center gap-2 transition-all text-left
                   ${uploadType === 'video'
@@ -353,7 +368,7 @@ export default function ProductDetailPage() {
               </button>
               <button
                 type="button"
-                onClick={() => { setUploadType('manual'); setUploadFile(null); setVideoSource('file') }}
+                onClick={() => { setUploadType('manual'); setUploadFile(null); setVideoSource('file'); setVideoUrl('') }}
                 className={`
                   p-3 rounded-lg border-2 flex items-center gap-2 transition-all text-left
                   ${uploadType === 'manual'
@@ -366,6 +381,23 @@ export default function ProductDetailPage() {
                 <div>
                   <p className={`text-xs font-semibold ${uploadType === 'manual' ? 'text-accent' : 'text-text-primary'}`}>Manual PDF</p>
                   <p className="text-[10px] text-text-muted">Até 50MB</p>
+                </div>
+              </button>
+              <button
+                type="button"
+                onClick={() => { setUploadType('media'); setUploadFile(null); setVideoSource('file'); setVideoUrl('') }}
+                className={`
+                  p-3 rounded-lg border-2 flex items-center gap-2 transition-all text-left
+                  ${uploadType === 'media'
+                    ? 'border-accent bg-accent-muted'
+                    : 'border-border bg-canvas hover:border-accent/50'
+                  }
+                `}
+              >
+                <Image className={`w-4 h-4 flex-shrink-0 ${uploadType === 'media' ? 'text-accent' : 'text-text-muted'}`} />
+                <div>
+                  <p className={`text-xs font-semibold ${uploadType === 'media' ? 'text-accent' : 'text-text-primary'}`}>Midia</p>
+                  <p className="text-[10px] text-text-muted">Ate 5 imagens</p>
                 </div>
               </button>
             </div>
@@ -441,7 +473,7 @@ export default function ProductDetailPage() {
                 type="text"
                 value={uploadTitle}
                 onChange={(e) => setUploadTitle(e.target.value)}
-                placeholder={uploadType === 'video' ? 'Ex: Como apresentar o produto' : 'Ex: Manual de Montagem'}
+                placeholder={uploadType === 'video' ? 'Ex: Como apresentar o produto' : uploadType === 'media' ? 'Ex: Galeria do produto' : 'Ex: Manual de Montagem'}
                 required
                 className="w-full px-3 py-2 rounded-lg text-sm bg-canvas border border-border text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30 transition-colors"
               />
@@ -492,7 +524,7 @@ export default function ProductDetailPage() {
             ) : (
               <div>
                 <label className="block text-xs font-medium text-text-muted mb-1.5">
-                  {uploadType === 'video' ? 'Arquivo de Vídeo *' : 'Arquivo PDF *'}
+                  {uploadType === 'video' ? 'Arquivo de Video *' : uploadType === 'media' ? 'Arquivo de Midia *' : 'Arquivo PDF *'}
                 </label>
                 <label className="flex flex-col items-center justify-center w-full py-6 rounded-lg border-2 border-dashed border-border hover:border-accent cursor-pointer transition-colors bg-canvas">
                   <Upload className="w-5 h-5 text-text-muted mb-1.5" />
@@ -505,7 +537,7 @@ export default function ProductDetailPage() {
                   <input
                     type="file"
                     className="hidden"
-                    accept={uploadType === 'video' ? 'video/*' : 'application/pdf'}
+                    accept={uploadType === 'video' ? 'video/*' : uploadType === 'media' ? 'image/*' : 'application/pdf'}
                     onChange={(e) => setUploadFile(e.target.files?.[0] ?? null)}
                   />
                 </label>
@@ -572,7 +604,7 @@ export default function ProductDetailPage() {
               <span>{tab.emoji}</span>
               {tab.label}
               <span className="text-[11px] bg-canvas border border-border px-1.5 py-0.5 rounded-full">
-                {videos.filter(v => v.type === tab.key).length + manuals.filter(m => m.type === tab.key).length}
+                {videos.filter(v => v.type === tab.key && !isMediaVideoRecord(v)).length + manuals.filter(m => m.type === tab.key).length + videos.filter(v => v.type === tab.key && isMediaVideoRecord(v)).length}
               </span>
             </button>
           ))}
@@ -638,9 +670,32 @@ export default function ProductDetailPage() {
               </div>
             )}
 
-            {filteredVideos.length === 0 && filteredManuals.length === 0 && (
+            {/* Midias */}
+            {filteredMedia.length > 0 && (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {filteredMedia.map((media: any) => (
+                  <a
+                    key={media.id}
+                    href={media.video_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="bg-card border border-border rounded-xl overflow-hidden shadow-card hover:border-accent hover:shadow-card-hover transition-all duration-200 group"
+                  >
+                    <div className="aspect-video bg-canvas overflow-hidden">
+                      <img src={media.video_url} alt={media.title} className="w-full h-full object-cover group-hover:scale-[1.02] transition-transform duration-200" />
+                    </div>
+                    <div className="p-3 flex items-center gap-2">
+                      <Image className="w-4 h-4 text-accent flex-shrink-0" />
+                      <p className="text-sm font-medium text-text-primary truncate">{media.title}</p>
+                    </div>
+                  </a>
+                ))}
+              </div>
+            )}
+
+            {filteredVideos.length === 0 && filteredManuals.length === 0 && filteredMedia.length === 0 && (
               <div className="bg-card border border-border rounded-xl p-10 text-center shadow-card">
-                <p className="text-sm text-text-muted">Nenhum conteúdo adicionado nesta aba.</p>
+                <p className="text-sm text-text-muted">Nenhum conteudo adicionado nesta aba.</p>
               </div>
             )}
           </div>
@@ -667,7 +722,7 @@ export default function ProductDetailPage() {
               </div>
               <p className="text-sm text-text-muted leading-relaxed">
                 Tem certeza que deseja excluir <strong className="text-text-primary">{product.name}</strong>?
-                Todos os vídeos e manuais associados também serão removidos.
+                Todos os videos, midias e manuais associados tambem serao removidos.
               </p>
               <div className="flex gap-3 pt-1">
                 <button
