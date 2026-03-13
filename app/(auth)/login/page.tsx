@@ -43,11 +43,18 @@ export default function LoginPage() {
       return
     }
 
-    const { data: profile } = await supabase
+    const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('role')
       .eq('id', user.id)
       .single()
+
+    if (profileError || !profile) {
+      await supabase.auth.signOut()
+      setError('Conta autenticada, mas sem perfil de acesso. Fale com o administrador.')
+      setLoading(false)
+      return
+    }
 
     const rawRole = String(profile?.role ?? '').trim().toLowerCase()
     const isFabricante = rawRole === 'admin' || rawRole === 'fabricante' || rawRole === 'manufacturer'
